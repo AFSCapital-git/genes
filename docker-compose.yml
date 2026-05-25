@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: genes_postgres
+    environment:
+      POSTGRES_USER: genes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-genes_password}
+      POSTGRES_DB: genes
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U genes"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: genes_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Agente_Constructor API
+  agente_constructor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: genes_agente_constructor
+    environment:
+      DATABASE_URL: postgresql+asyncpg://genes:${POSTGRES_PASSWORD:-genes_password}@postgres:5432/genes
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-change_this_in_production}
+      DEBUG: ${DEBUG:-false}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for agent deployment
+      - ./agents/generated:/app/agents/generated
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: genes_network
